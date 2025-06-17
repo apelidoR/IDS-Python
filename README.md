@@ -1,4 +1,4 @@
-# Idsstar
+# IDSstar
 
 Sistema simples de Detecção de Intrusão (IDS) desenvolvido em Python utilizando a biblioteca Scapy para captura e análise de pacotes de rede em tempo real.
 
