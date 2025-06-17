@@ -21,15 +21,17 @@ assinaturas = [
 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 alerta_detectado = ""
 load_visivel = ""
+diretorio_csv1 = "Dados"
+diretorio_csv2 = "Dados/blacklist"
 
 # Criar e definir os CSVs
-arquivo_csv = f"{timestamp} - resultados_ids.csv"
+arquivo_csv = os.path.join(diretorio_csv1, f"{timestamp} - resultados_ids.csv")
 with open(arquivo_csv, mode="w", newline="") as arquivo:
     writer = csv.writer(arquivo)
     writer.writerow(["Timestamp", "Src_IP", "Src_Port", "Dst_IP", "Dst_Port", "Flags", "Label", "Desc", "Packet_Count_src", "Packet_Count_dst"])
 
 
-arquivo_csv2 = "blacklist.csv"
+arquivo_csv2 = os.path.join(diretorio_csv2, "blacklist.csv")
 
 if not os.path.exists(arquivo_csv2):
     
@@ -71,7 +73,7 @@ def Alertas(src_ip, tempo_atual, packet, dst_port, dst_ip, src_port):
             return "SYN FLOOD"
     
     # ICMP Flood
-    if packet.haslayer(ICMP):
+    if packet.haslayer(TCP):
         icmp_contagem[src_ip].append(tempo_atual)
         icmp_contagem[src_ip] = [t for t in icmp_contagem[src_ip] if tempo_atual - t < 1]
 
@@ -162,6 +164,7 @@ def bloquear_ip(ip, descricao):
 
 
 def capturar_pacote(packet):
+
     alerta_detectado = ""
     load_visivel = ""
    
@@ -213,8 +216,8 @@ def capturar_pacote(packet):
             desc = f"[ALERTA] Assinaturas detectadas no tráfego de {src_ip} -> {dst_ip} : {alerta_detectado.strip()}"
             print(f"[ALERTA] Assinaturas detectadas no tráfego de {src_ip} -> {dst_ip}: {alerta_detectado.strip()}")
 
-        if alerta_detectado in ["ICMP_FLOOD", "SYN FLOOD", "NMAP/Port_Scan", "UDP_FLOOD", assinaturas, "DOS_SLOW_AND_LOW"]:
-            bloquear_ip(src_ip, desc)
+        #if alerta_detectado in ["ICMP_FLOOD", "SYN FLOOD", "NMAP/Port_Scan", "UDP_FLOOD", assinaturas, "DOS_SLOW_AND_LOW"]:
+        #    bloquear_ip(src_ip, desc)
         
         contagem_pacotes_src[(src_ip, src_port)] += 1
         contagem_pacotes_dst[(dst_ip, dst_port)] += 1
