@@ -4,11 +4,59 @@ from datetime import datetime
 import csv
 import subprocess
 import os
+import pandas as pd
 import time
 
 
+class FileManager:
+    def __init__(self, diretorio_dados="Dados"):
+        self.diretorio_dados = diretorio_dados
+        self.diretorio_blacklist = os.path.join(diretorio_dados, "blacklist")
+
+        os.makedirs(self.diretorio_dados, exist_ok=True)
+        os.makedirs(self.diretorio_blacklist, exist_ok=True)
+
+    def criar_log(self):
+        timestamp = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
+        arquivo_log = os.path.join(self.diretorio_dados, f"{timestamp} - logs.csv")
+        with open(arquivo_log, mode="w",newline="") as arquivo:
+            writer = csv.writer(arquivo)
+            writer.writerow(["Timestamp", "Src_IP", "Src_Port", "Dst_IP", "Dst_Port",
+                              "Flags", "Label", "Desc", "Packet_Count_src", "Packet_Count_dst"])
+        return arquivo_log
+    
+    
+    def inicializar_blacklist(self):
+        arquivo_blacklist = os.path.join(self.diretorio_blacklist, "blacklist.csv")
+        if not os.path.exists(arquivo_blacklist):
+            with open(arquivo_blacklist, mode="w", newline="") as arquivo:
+                writer = csv.writer(arquivo)
+                writer.writerow(["Timestamp", "IP", "Desc"])
+        return arquivo_blacklist
+    
+    def salvar_blacklist(self, caminho, ip, descricao):
+        try: 
+            df = pd.read_csv(caminho)
+            if ip not in df["IP"].values:
+                with open(caminho, mode="a", newline="") as arquivo:
+                    writer = csv.writer(arquivo)
+                    writer.writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), ip, descricao])
+            
+        except Exception:
+             with open(caminho, mode="a", newline="") as arquivo:
+                writer = csv.writer(arquivo)
+                writer.writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), ip, descricao])
+
+    def salvar_log(self, caminho, dados):
+        with open(caminho, mode="a", newline="") as arquivo:
+            writer = csv.writer(arquivo)
+            writer.writerow(dados)
+
 class IntrusionDetectionSystem:
-    def __init__(self):
+    def __init__(self, file_manager: FileManager):
+        self.file_manager = file_manager
+
+        # Assinaturas
         self.assinaturas = [
             "MALWARE", "ATTACK", "SQLMAP", "NMAP", "INJECTION", "SLOWLORIS", "SLOWHTTPTEST", "DIRB", "DIRBUSTER",
             "WFUZZ", "FEROXBUSTER", "GOBUSTER", "HYDRA", "JOHN", "MEDUSA", "METASPLOIT", "MSF", "MSFVENOM", "SQLI",
@@ -21,70 +69,68 @@ class IntrusionDetectionSystem:
             "SYS DATABASES"
         ]
 
-        self.timestamp = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
-        self.diretorio_csv1 = "Dados"
-        self.diretorio_csv2 = "Dados/blacklist"
+        # Controle interno
+        self.__icmp_contagem = defaultdict(list)
+        #self.__udp_contagem = defaultdict(list)
+        self.__tcp_syn_contagem = defaultdict(list)
+        self.__ips_bloqueados = set()
 
-        os.makedirs(self.diretorio_csv1, exist_ok=True)
-        os.makedirs(self.diretorio_csv2, exist_ok=True)
-
-        self.arquivo_csv = os.path.join(self.diretorio_csv1, f"{self.timestamp} - resultados_ids.csv")
-        self.arquivo_csv2 = os.path.join(self.diretorio_csv2, "blacklist.csv")
-
-        self._inicializar_csvs()
-
-        # Controle
-        self.icmp_contagem = defaultdict(list)
-        self.udp_contagem = defaultdict(list)
-        self.tcp_syn_contagem = defaultdict(list)
-        self.ack_contagem = defaultdict(list)
-        self.conexoes = defaultdict(list)
-        self.ips_bloqueados = set()
-
-        self.contagem_pacotes_src = defaultdict(int)
-        self.contagem_pacotes_dst = defaultdict(int)
+        self.__contagem_pacotes_src = defaultdict(int)
+        self.__contagem_pacotes_dst = defaultdict(int)
 
         # Limites
-        self.limite_icmp = 100
-        self.limite_syn = 100
-        self.limite_udp = 100
-        
-        
-        
+        self.__limite_icmp = 100
+        self.__limite_syn = 100
+        self.__limite_udp = 100
 
-    def _inicializar_csvs(self):
-        with open(self.arquivo_csv, mode="w", newline="") as arquivo:
-            writer = csv.writer(arquivo)
-            writer.writerow(["Timestamp", "Src_IP", "Src_Port", "Dst_IP", "Dst_Port",
-                             "Flags", "Label", "Desc", "Packet_Count_src", "Packet_Count_dst"])
+        # Arquivos
+        self.__arquivo_log = self.file_manager.criar_log()
+        self.__arquivo_blacklist = self.file_manager.inicializar_blacklist()
 
-        if not os.path.exists(self.arquivo_csv2):
-            with open(self.arquivo_csv2, mode="w", newline="") as arquivo_blacklist:
-                writer = csv.writer(arquivo_blacklist)
-                writer.writerow(["Timestamp", "IP", "Desc"])
+    # ===========================
+    # Getters e Setters
+    # ===========================
 
-    def salvar_na_blacklist(self, ip, descricao):
-        try:
-            with open(self.arquivo_csv2, mode="r") as arquivo:
-                linhas = arquivo.readlines()
-                ips_existentes = [linha.split(",")[1].strip() for linha in linhas[1:]]
-        except FileNotFoundError:
-            ips_existentes = []
+    def get_limite_icmp(self):
+        return self.__limite_icmp
 
-        if ip not in ips_existentes:
-            with open(self.arquivo_csv2, mode="a", newline="") as arquivo_blacklist:
-                writer = csv.writer(arquivo_blacklist)
-                writer.writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), ip, descricao])
+    
+    def set_limite_icmp(self, valor: int):
+        self.__limite_icmp = valor
+
+    
+    def get_limite_syn(self):
+        return self.__limite_syn
+
+    
+    def set_limite_syn(self, valor: int):
+        self.__limite_syn = valor
+
+    
+    #def get_limite_udp(self):
+    #    return self.__limite_udp
+
+    
+    #def set_limite_udp(self, valor: int):
+    #    self.__limite_udp = valor
+
+    # ===========================
+    # Firewall e Blacklist
+    # ===========================
 
     def bloquear_ip(self, ip, descricao):
-        if ip not in self.ips_bloqueados:
+        if ip not in self.__ips_bloqueados:
             try:
                 subprocess.run(["iptables", "-A", "INPUT", "-s", ip, "-j", "DROP"], check=True)
                 print(f"[FIREWALL] IP {ip} bloqueado!")
-                self.ips_bloqueados.add(ip)
-                self.salvar_na_blacklist(ip, descricao)
+                self.__ips_bloqueados.add(ip)
+                self.file_manager.salvar_na_blacklist(self.__arquivo_blacklist, ip, descricao)
             except subprocess.CalledProcessError as e:
                 print(f"[ERRO] Falha ao bloquear IP {ip}: {e}")
+
+    # ===========================
+    # Análise
+    # ===========================
 
     def analisar_assinaturas(self, packet):
         if packet.haslayer(Raw):
@@ -98,36 +144,30 @@ class IntrusionDetectionSystem:
         return None
 
     def detectar_ataques(self, src_ip, tempo_atual, packet):
-        # SYN Flood
         if packet.haslayer(TCP):
             flags = packet[TCP].flags
             if flags == "S":
-                self.tcp_syn_contagem[src_ip].append(tempo_atual)
-                self.tcp_syn_contagem[src_ip] = [
-                    t for t in self.tcp_syn_contagem[src_ip] if tempo_atual - t < 10
+                self.__tcp_syn_contagem[src_ip].append(tempo_atual)
+                self.__tcp_syn_contagem[src_ip] = [
+                    t for t in self.__tcp_syn_contagem[src_ip] if tempo_atual - t < 10
                 ]
-                if len(self.tcp_syn_contagem[src_ip]) > self.limite_syn:
+                if len(self.__tcp_syn_contagem[src_ip]) > self.__limite_syn:
                     return "SYN_FLOOD"
 
-        # UDP Flood
-        if packet.haslayer(UDP):
-            self.udp_contagem[src_ip].append(tempo_atual)
-            self.udp_contagem[src_ip] = [
-                t for t in self.udp_contagem[src_ip] if tempo_atual - t < 1
-            ]
-            if len(self.udp_contagem[src_ip]) > self.limite_udp:
-                return "UDP_FLOOD"
 
-        # ICMP Flood (Corrigido)
-        if packet.haslayer(TCP):
-            self.icmp_contagem[src_ip].append(tempo_atual)
-            self.icmp_contagem[src_ip] = [
-                t for t in self.icmp_contagem[src_ip] if tempo_atual - t < 1
+        if packet.haslayer(TCP):  # Corrigir para ICMP se necessário
+            self.__icmp_contagem[src_ip].append(tempo_atual)
+            self.__icmp_contagem[src_ip] = [
+                t for t in self.__icmp_contagem[src_ip] if tempo_atual - t < 1
             ]
-            if len(self.icmp_contagem[src_ip]) > self.limite_icmp:
+            if len(self.__icmp_contagem[src_ip]) > self.__limite_icmp:
                 return "ICMP_FLOOD"
 
         return None
+
+    # ===========================
+    # Processamento de Pacotes
+    # ===========================
 
     def processar_pacote(self, packet):
         if IP in packet:
@@ -149,30 +189,34 @@ class IntrusionDetectionSystem:
                 desc = f"[ALERTA] Tráfego suspeito de {src_ip} -> {dst_ip}: {alerta}"
                 print(desc)
 
-                # self.bloquear_ip(src_ip, desc)  # Descomente se quiser bloquear automaticamente
+                # Ativar se desejar bloquear automaticamente:
+                # self.bloquear_ip(src_ip, desc)
 
-            self.contagem_pacotes_src[(src_ip, src_port)] += 1
-            self.contagem_pacotes_dst[(dst_ip, dst_port)] += 1
+            self.__contagem_pacotes_src[(src_ip, src_port)] += 1
+            self.__contagem_pacotes_dst[(dst_ip, dst_port)] += 1
 
             print("=" * 70)
-            print(f"[{self.timestamp}]")
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]")
             print(f"Src {src_ip}:{src_port} --> Dst {dst_ip}:{dst_port}")
             print(f"Flags: {flags}")
             print(f"Alerta: {alerta}")
-            print(f"Pacotes src: {self.contagem_pacotes_src[(src_ip, src_port)]}")
-            print(f"Pacotes dst: {self.contagem_pacotes_dst[(dst_ip, dst_port)]}")
+            print(f"Pacotes src: {self.__contagem_pacotes_src[(src_ip, src_port)]}")
+            print(f"Pacotes dst: {self.__contagem_pacotes_dst[(dst_ip, dst_port)]}")
             print("=" * 70)
 
-            with open(self.arquivo_csv, mode="a", newline="") as arquivo:
-                writer = csv.writer(arquivo)
-                writer.writerow([
-                    self.timestamp, src_ip, src_port, dst_ip, dst_port,
-                    flags, alerta, desc,
-                    self.contagem_pacotes_src[(src_ip, src_port)],
-                    self.contagem_pacotes_dst[(dst_ip, dst_port)]
-                ])
+            self.file_manager.salvar_log(self.__arquivo_log, [
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                src_ip, src_port, dst_ip, dst_port,
+                flags, alerta, desc,
+                self.__contagem_pacotes_src[(src_ip, src_port)],
+                self.__contagem_pacotes_dst[(dst_ip, dst_port)]
+            ])
 
-    def iniciar_monitoramento(self, interface=None):
+    # ===========================
+    # Monitoramento
+    # ===========================
+
+    def iniciar_monitoramento(self, interface: str = None):
         print("Iniciando monitoramento... Pressione CTRL+C para parar.")
         try:
             sniff(prn=self.processar_pacote, store=0, iface=interface)
