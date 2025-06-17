@@ -48,6 +48,9 @@ class IntrusionDetectionSystem:
         self.limite_icmp = 100
         self.limite_syn = 100
         self.limite_udp = 100
+        
+        
+        
 
     def _inicializar_csvs(self):
         with open(self.arquivo_csv, mode="w", newline="") as arquivo:
