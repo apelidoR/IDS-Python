@@ -74,6 +74,7 @@ class IntrusionDetectionSystem:
         #self.__udp_contagem = defaultdict(list)
         self.__tcp_syn_contagem = defaultdict(list)
         self.__ips_bloqueados = set()
+        self.__conexoes = defaultdict(list)
 
         self.__contagem_pacotes_src = defaultdict(int)
         self.__contagem_pacotes_dst = defaultdict(int)
@@ -143,7 +144,7 @@ class IntrusionDetectionSystem:
                 pass
         return None
 
-    def detectar_ataques(self, src_ip, tempo_atual, packet):
+    def detectar_ataques(self, src_ip, tempo_atual, packet, dst_port, dst_ip):
         if packet.haslayer(TCP):
             flags = packet[TCP].flags
             if flags == "S":
@@ -162,8 +163,44 @@ class IntrusionDetectionSystem:
             ]
             if len(self.__icmp_contagem[src_ip]) > self.__limite_icmp:
                 return "ICMP_FLOOD"
-
+        # Existing DOS Slow and Low detection
+        if packet.haslayer(Raw):
+            payload = packet[Raw].load
+            if payload.startswith(b'GET') or payload.startswith(b'POST'):
+                if b'\r\n\r\n' not in payload:
+                    print("[ALERTA] Cabeçalho HTTP incompleto detectado!")
+                    return "DOS_SLOW_AND_LOW"
+                
+        # Existing HTTPS connection without payload detection
+        if packet.haslayer(TCP) and packet.haslayer(IP):
+            flags = packet[TCP].flags
+            if dst_port == 443:
+                conexao = (src_ip, dst_ip, packet[TCP].sport, dst_port)
+                if flags & "SA" and not flags & "S":
+                    self.__conexoes[conexao] = {"status": "SYN enviado", "tempo": tempo_atual}
+                if flags & "A":
+                    self.__conexoes[conexao]["status"] = "TCP estabelecido"
+                if packet.haslayer(Raw):
+                    payload = bytes(packet[Raw].load)
+                    if payload.startswith(b'\x16\x03'):
+                        self.__conexoes[conexao]["status"] = "Handshake TLS"
+                    elif payload.startswith(b'\x17\x03'):
+                        self.__conexoes[conexao]["status"] = "Application Data enviado"
+                        self.__conexoes[conexao]["payload"] = True
+                for conn, info in self.__conexoes.items():
+                    if time.time() - info["tempo"] > 30:
+                        if info.get("status") == "Handshake TLS" and not info.get("payload"):
+                            print(f"[ALERTA] Conexão HTTPS sem payload detectada: {conn}")
+                            return "DOS_SLOW_AND_LOW"
+                
+        if packet.haslayer(IP) and packet[IP].flags == 1:
+            return "FRAGMENTATION_ATTACK"
+        
+        
         return None
+    
+        
+        
 
     # ===========================
     # Processamento de Pacotes
@@ -173,20 +210,20 @@ class IntrusionDetectionSystem:
         if IP in packet:
             src_ip = packet[IP].src
             dst_ip = packet[IP].dst
-            src_port = packet.sport if packet.haslayer((TCP, UDP)) else "N/A"
-            dst_port = packet.dport if packet.haslayer((TCP, UDP)) else "N/A"
+            src_port = packet.sport if packet.haslayer(TCP) or  packet.haslayer(UDP) else "N/A"
+            dst_port = packet.dport if packet.haslayer(TCP) or packet.haslayer(UDP) else "N/A"
             flags = packet[TCP].flags if packet.haslayer(TCP) else "N/A"
 
             tempo_atual = time.time()
 
             alerta_assinatura = self.analisar_assinaturas(packet)
-            alerta_ataque = self.detectar_ataques(src_ip, tempo_atual, packet)
+            alerta_ataque = self.detectar_ataques(src_ip, tempo_atual, packet, dst_port, dst_ip)
 
             alerta = alerta_assinatura or alerta_ataque or "TRAFEGO_NORMAL"
 
             desc = ""
             if alerta != "TRAFEGO_NORMAL":
-                desc = f"[ALERTA] Tráfego suspeito de {src_ip} -> {dst_ip}: {alerta}"
+                desc = f"Assinatura detectada no tráfego de {src_ip} -> {dst_ip}: {alerta}"
                 print(desc)
 
                 # Ativar se desejar bloquear automaticamente:
