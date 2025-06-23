@@ -42,9 +42,15 @@ else:
                 'Contagem': contagem.values,
                 'Porcentagem (%)': percent.values
             })
-                # Gerando as cores
-            cor = plt.get_cmap('tab20').colors[:len(texto)]
-            resultado['cor'] = [f'background-color: {matplotlib.colors.to_hex(c)}' for c in cor]
+                #Gerando as cores 
+            paleta = plt.get_cmap('tab20').colors[:len(resultado)]
+            resultado['Cor'] =[
+                f'background-color:{matplotlib.colors.to_hex(c)}'
+                for c in paleta
+            ]
+           
+
+            
 
             # Colunas
             col1, col2 = st.columns([1,1])
@@ -55,7 +61,7 @@ else:
                 wedges, texts = ax.pie(sizes,
                     labels=None,
                     startangle=90,
-                    colors=cor,
+                    colors = paleta,
                     pctdistance=0.8,
                     explode = expandir)
                 
@@ -71,19 +77,8 @@ else:
 
                 # Passo 5: Tabela do grafico
                 with col2:
-                    # Cores na tabela 
-                    styled = resultado.style.apply(
-                        lambda _: resultado['cor'], axis=0
-                    ).hide_columns(['cor'])
-                    st.dataframe(styled, use_container_width=True, height=400)
-
-                    # Legenda visual
-                    legenda = ""
-                    for cor, cat in zip (cor, texto):
-                        hexc = matplotlib.colors.to_hex(cor)
-                        legenda +=(
-                            f"<div style='display:inline-block;"
-                            f"width:15px; height:15px; background:{hexc};"
-                            f"margin-right:5px;'></div>{cat}&nbsp;&nbsp;"
-                        )
-                    st.markdown(legenda, unsafe_allow_html=True)
+                    styled = resultado.style \
+                        .apply(lambda _: resultado['Cor'], axis=0)
+                    st.dataframe(styled, use_container_width=True, height=400,
+                                 column_config={"Cor": None})
+  
