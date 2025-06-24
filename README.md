@@ -27,7 +27,7 @@ Este projeto implementa um IDS básico que monitora o tráfego de rede, buscando
 git clone https://github.com/apelidoR/IDS-Python.git
 cd IDS-Python
 ```
-É obrigatorio que você tenha o mysql instalado 
+É obrigatorio que você tenha o MySQL instalado 
 
 2. Com o MySQL instalado, acesse o terminal como root
 ```bash
