@@ -67,10 +67,15 @@ with col1:
 # Passo 5: Tabela do grafico
 with col2:
     # Cores na tabela 
+  
+    resultado = resultado.drop(columns=["cor"])
+    #resultado = resultado.drop(columns=["Label"])
     styled = resultado.style.apply(
+        
         lambda _: [f'background-color: {matplotlib.colors.to_hex(c)}; color: black' for c in cor],
         axis=0
-    ).hide(axis="columns", subset=["cor"])
+       
+    )
     
     st.dataframe(styled, use_container_width=True, height=400)
 
