@@ -1,4 +1,4 @@
-from scapy.all import sniff, IP, TCP, UDP, Raw
+from scapy.all import sniff, IP, TCP, UDP, Raw, ICMP
 from collections import defaultdict
 from datetime import datetime
 import csv
@@ -6,68 +6,97 @@ import subprocess
 import os
 import pandas as pd
 import time
+import mysql.connector
 
+class DatabaseManager:
+    def __init__(self, host='localhost', user='admin', password='admin', database='idsstarlyDB'):
+        try:
+            self.conn = mysql.connector.connect(
+                host=host,
+                user=user,
+                password=password,
+                database=database
+            )
+            self.cursor = self.conn.cursor()
+            self.criar_tabelas()
 
-class FileManager:
-    def __init__(self, diretorio_dados="Dados"):
-        self.diretorio_dados = diretorio_dados
-        self.diretorio_blacklist = os.path.join(diretorio_dados, "blacklist")
-
-        os.makedirs(self.diretorio_dados, exist_ok=True)
-        os.makedirs(self.diretorio_blacklist, exist_ok=True)
-
-    def criar_log(self):
-        timestamp = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
-        arquivo_log = os.path.join(self.diretorio_dados, f"{timestamp} - logs.csv")
-        with open(arquivo_log, mode="w",newline="") as arquivo:
-            writer = csv.writer(arquivo)
-            writer.writerow(["Timestamp", "Src_IP", "Src_Port", "Dst_IP", "Dst_Port",
-                              "Flags", "Label", "Desc", "Packet_Count_src", "Packet_Count_dst"])
-        return arquivo_log
-    
-    
-    def inicializar_blacklist(self):
-        arquivo_blacklist = os.path.join(self.diretorio_blacklist, "blacklist.csv")
-        if not os.path.exists(arquivo_blacklist):
-            with open(arquivo_blacklist, mode="w", newline="") as arquivo:
-                writer = csv.writer(arquivo)
-                writer.writerow(["Timestamp", "IP", "Desc"])
-        return arquivo_blacklist
-    
-    def salvar_blacklist(self, caminho, ip, descricao):
-        try: 
-            df = pd.read_csv(caminho)
-            if ip not in df["IP"].values:
-                with open(caminho, mode="a", newline="") as arquivo:
-                    writer = csv.writer(arquivo)
-                    writer.writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), ip, descricao])
+            print("[BANCO] Conectado com sucesso!")
+        except mysql.connector.Error as err:
+            print(f"[ERRO] Erro na conexão com o banco: {err}")
+            exit(1)  # Encerra o programa se não conectar
             
-        except Exception:
-             with open(caminho, mode="a", newline="") as arquivo:
-                writer = csv.writer(arquivo)
-                writer.writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), ip, descricao])
+    def criar_tabelas(self):
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS logs (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                timestamp DATETIME,
+                src_ip VARCHAR(50),
+                src_port VARCHAR(20),
+                dst_ip VARCHAR(50),
+                dst_port VARCHAR(20),
+                label VARCHAR(100),
+                descricao TEXT,
+                packet_count_src INT,
+                packet_count_dst INT
+            )
+        ''')
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS blacklist (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                timestamp DATETIME,
+                ip VARCHAR(50) UNIQUE,
+                descricao TEXT
+            )
+        ''')
+        self.conn.commit()
+        
+    def salvar_log(self, dados):
+        query = '''
+        INSERT INTO logs (
+            timestamp, src_ip, src_port, dst_ip, dst_port, 
+            label, descricao, packet_count_src, packet_count_dst
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+    '''
+        
+        self.cursor.execute(query, dados)
+        self.conn.commit()
+        
+    def salvar_na_blacklist(self, ip, descricao):
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        query = '''
+            INSERT IGNORE INTO blacklist (timestamp, ip, descricao)
+            VALUES (%s, %s, %s)
+        '''
+        self.cursor.execute(query, (timestamp, ip, descricao))
+        self.conn.commit()
 
-    def salvar_log(self, caminho, dados):
-        with open(caminho, mode="a", newline="") as arquivo:
-            writer = csv.writer(arquivo)
-            writer.writerow(dados)
+        
+    def fechar_conexao(self):
+        self.conn.close()
+        print("[BANCO] Conexão encerrada.")       
+    
+    
+    def inserir_ip(self, ip):
+        try:
+            self.cursor.execute("SELECT ip_id FROM ips WHERE ip = %s", (ip,))
+            resultado = self.cursor.fetchone()
+            if resultado:
+                return resultado[0]
+            else:
+                self.cursor.execute("INSERT INTO ips (ip) VALUES (%s)", (ip,))
+                self.conn.commit()
+                return self.cursor.lastrowid
+        except mysql.connector.Error as err:
+            print(f"[BANCO] Erro ao inserir IP: {err}")
+            return None 
 
 class IntrusionDetectionSystem:
-    def __init__(self, file_manager: FileManager):
-        self.file_manager = file_manager
+    def __init__(self, db: DatabaseManager):
+        self.db = db
 
         # Assinaturas
         self.assinaturas = [
-            "MALWARE", "ATTACK", "SQLMAP", "NMAP", "INJECTION", "SLOWLORIS", "SLOWHTTPTEST", "DIRB", "DIRBUSTER",
-            "WFUZZ", "FEROXBUSTER", "GOBUSTER", "HYDRA", "JOHN", "MEDUSA", "METASPLOIT", "MSF", "MSFVENOM", "SQLI",
-            "SQL INJECTION", "UNION SELECT", "' OR '1'='1", "XSS", "<SCRIPT>", "CURL", "WGET", "POC", "EXPLOIT",
-            "RCE", "CMD=", "SHELL", "NC -E", "BASH -I", "BIN/SH", "/ETC/PASSWD", "/ETC/SHADOW", "NETCAT",
-            "REVERSE SHELL", "METERPRETER", "EVILGINX", "ZPHISHER", "SETOOLKIT", "SOCIAL ENGINEERING TOOLKIT",
-            "BURP", "INTRUDER", "INJECTION", "FILE INCLUSION", "LFI", "RFI", "PHPMYADMIN", "WP-ADMIN",
-            "ADMIN LOGIN", "ROOT", "PWD", "CHMOD", "CHOWN", "SUDO", "SSH", "OPENVAS", "NESSUS", "MASSCAN", "ZMAP",
-            "FLOOD", "DOS", "DDOS", "SLOW", "SLEEP(", "WAITFOR DELAY", "BENCHMARK(", "XP_CMDSHELL", "SYSOBJECTS",
-            "SYS DATABASES"
-        ]
+            "MALWARE", "ATTACK", "SQLMAP", "NMAP", "INJECTION", "SLOWLORIS", "SLOWHTTPTEST", "CURL"]
 
         # Controle interno
         self.__icmp_contagem = defaultdict(list)
@@ -78,16 +107,13 @@ class IntrusionDetectionSystem:
 
         self.__contagem_pacotes_src = defaultdict(int)
         self.__contagem_pacotes_dst = defaultdict(int)
-
+        self.__portScan_contagem = defaultdict(list)
         # Limites
-        self.__limite_icmp = 100
-        self.__limite_syn = 100
+        self.__limite_icmp = 10
+        self.__limite_syn = 10
         self.__limite_udp = 100
 
         # Arquivos
-        self.__arquivo_log = self.file_manager.criar_log()
-        self.__arquivo_blacklist = self.file_manager.inicializar_blacklist()
-
     # ===========================
     # Getters e Setters
     # ===========================
@@ -121,14 +147,10 @@ class IntrusionDetectionSystem:
 
     def bloquear_ip(self, ip, descricao):
         if ip not in self.__ips_bloqueados:
-            try:
-                subprocess.run(["iptables", "-A", "INPUT", "-s", ip, "-j", "DROP"], check=True)
-                print(f"[FIREWALL] IP {ip} bloqueado!")
-                self.__ips_bloqueados.add(ip)
-                self.file_manager.salvar_na_blacklist(self.__arquivo_blacklist, ip, descricao)
-            except subprocess.CalledProcessError as e:
-                print(f"[ERRO] Falha ao bloquear IP {ip}: {e}")
-
+        
+            self.__ips_bloqueados.add(ip)
+            self.db.salvar_na_blacklist(ip, descricao)
+                                         
     # ===========================
     # Análise
     # ===========================
@@ -155,8 +177,20 @@ class IntrusionDetectionSystem:
                 if len(self.__tcp_syn_contagem[src_ip]) > self.__limite_syn:
                     return "SYN_FLOOD"
 
+        if packet.haslayer(TCP):
+            self.__portScan_contagem[src_ip].append((dst_port, tempo_atual))
+            
+            
+            self.__portScan_contagem[src_ip] = [
+                (porta, t) for (porta, t) in self.__portScan_contagem[src_ip] if tempo_atual - t < 10
+            ]
+            
+            portas_unicas = set([porta for porta, _ in self.__portScan_contagem[src_ip]])
+            
+            if len(portas_unicas) > 20:
+                return "PORT_SCAN"
 
-        if packet.haslayer(TCP):  # Corrigir para ICMP se necessário
+        if packet.haslayer(ICMP):  # Corrigir para ICMP se necessário
             self.__icmp_contagem[src_ip].append(tempo_atual)
             self.__icmp_contagem[src_ip] = [
                 t for t in self.__icmp_contagem[src_ip] if tempo_atual - t < 1
@@ -191,7 +225,7 @@ class IntrusionDetectionSystem:
                     if time.time() - info["tempo"] > 30:
                         if info.get("status") == "Handshake TLS" and not info.get("payload"):
                             print(f"[ALERTA] Conexão HTTPS sem payload detectada: {conn}")
-                            return "DOS_SLOW_AND_LOW"
+                            return "HTTPS_SEM_PAYLOAD "
                 
         if packet.haslayer(IP) and packet[IP].flags == 1:
             return "FRAGMENTATION_ATTACK"
@@ -199,9 +233,6 @@ class IntrusionDetectionSystem:
         
         return None
     
-        
-        
-
     # ===========================
     # Processamento de Pacotes
     # ===========================
@@ -212,7 +243,7 @@ class IntrusionDetectionSystem:
             dst_ip = packet[IP].dst
             src_port = packet.sport if packet.haslayer(TCP) or  packet.haslayer(UDP) else "N/A"
             dst_port = packet.dport if packet.haslayer(TCP) or packet.haslayer(UDP) else "N/A"
-            flags = packet[TCP].flags if packet.haslayer(TCP) else "N/A"
+            flags = str(packet[TCP].flags) if packet.haslayer(TCP) else "N/A"
 
             tempo_atual = time.time()
 
@@ -225,9 +256,11 @@ class IntrusionDetectionSystem:
             if alerta != "TRAFEGO_NORMAL":
                 desc = f"Assinatura detectada no tráfego de {src_ip} -> {dst_ip}: {alerta}"
                 print(desc)
-
-                # Ativar se desejar bloquear automaticamente:
-                # self.bloquear_ip(src_ip, desc)
+                alert = ["DOS_SLOW_AND_LOW", "SYN_FLOOD", "ICMP_FLOOD", "FRAGMENTATION_ATTACK", "NMAP", "PORT_SCAN"]
+                if alerta in alert:
+                    
+                    # Ativar se desejar bloquear automaticamente:
+                    self.bloquear_ip(src_ip, desc)
 
             self.__contagem_pacotes_src[(src_ip, src_port)] += 1
             self.__contagem_pacotes_dst[(dst_ip, dst_port)] += 1
@@ -240,11 +273,11 @@ class IntrusionDetectionSystem:
             print(f"Pacotes src: {self.__contagem_pacotes_src[(src_ip, src_port)]}")
             print(f"Pacotes dst: {self.__contagem_pacotes_dst[(dst_ip, dst_port)]}")
             print("=" * 70)
-
-            self.file_manager.salvar_log(self.__arquivo_log, [
+            
+            
+            self.db.salvar_log([
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                src_ip, src_port, dst_ip, dst_port,
-                flags, alerta, desc,
+                src_ip, src_port, dst_ip, dst_port, alerta, desc,
                 self.__contagem_pacotes_src[(src_ip, src_port)],
                 self.__contagem_pacotes_dst[(dst_ip, dst_port)]
             ])

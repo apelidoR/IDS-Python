@@ -6,7 +6,7 @@ import os
 st.title("Gráfico de Rede")
 
 # Passo 1: Definindo a pasta e listando os arquivos CSV
-folder_path = "../Dados"  # Substitua pelo caminho da sua pasta
+folder_path = "/home/hugi/Projects/IDS_project/IDS_Python/Dados"  
 if not os.path.exists(folder_path):
     st.error("A pasta especificada não existe. Verifique o caminho.")
 else:
