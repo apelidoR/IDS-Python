@@ -1,9 +1,6 @@
-from idsstarly import *
 
-db = DatabaseManager()
+from idsstarly import * 
+file_manager = FileManager()
+ids = IntrusionDetectionSystem(file_manager)
 
-
-ids = IntrusionDetectionSystem(db)
-
-
-ids.iniciar_monitoramento("wlo1")
+ids.iniciar_monitoramento()
