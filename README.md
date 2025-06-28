@@ -27,9 +27,33 @@ Este projeto implementa um IDS básico que monitora o tráfego de rede, buscando
 git clone https://github.com/apelidoR/IDS-Python.git
 cd IDS-Python
 ```
-2. Execute o arquivo main.py:
+É obrigatorio que você tenha o MySQL instalado 
+
+2. Com o MySQL instalado, acesse o terminal como root
 ```bash
-python3 main.py
+mysql -u root -p
+
 ```
 
+3. Crie um usuário e garanta todos os privilegios
+```bash
+
+CREATE USER 'admin'@'localhost' IDENTIFIED BY 'admin';
+
+GRANT ALL PRIVILEGES ON *.* TO 'admin'@'localhost' WITH GRANT OPTION;
+
+FLUSH PRIVILEGES;
+
+
+```
+4. Crie o banco de dados
    
+```bash
+CREATE DATABASE idsstarlyDB;
+```
+
+
+5. Execute o arquivo main.py:
+```bash
+sudo python3 main.py
+```
